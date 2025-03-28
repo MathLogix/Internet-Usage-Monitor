@@ -1,21 +1,49 @@
 import psutil
 import tkinter as tk
+from tkinter import ttk, StringVar
 from tkinter import Toplevel, Entry, Frame, Button, Label, messagebox, PhotoImage
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 import threading
-from tkinter import Tk
 from PIL import Image, ImageTk
 import os
 import datetime
 import atexit
 import re
 
+max_target = 0
 target_limits = []
 target_popup_open = False
 downloaded_amount = 0
 downloaded_mb = 0
+progress = None
+
+def update_progress():
+    global downloaded_amount, progress, target_limits, max_target, target_label, progress_label
+
+    while True:
+        if target_limits:
+            max_target = max(target_limits) 
+            progress["maximum"] = max_target
+            progress["value"] = downloaded_amount
+
+            if max_target > 0:
+                progress_percent = (downloaded_amount / max_target) * 100
+                progress_percent = min(100, progress_percent)
+                progress_label.config(text=f"{progress_percent:.1f}%")
+            else:
+                progress_label.config(text="0%")
+
+            target_label.config(text=f"Max Target: {max_target:.2f} MB")
+
+            for target in target_limits[:]:
+                if downloaded_amount >= target:
+                    current_time3= datetime.datetime.now().strftime("%H:%M:%S")
+                    messagebox.showinfo("Download Target Reached", f"Target Reached {target} MB at {current_time3}")
+                    target_limits.remove(target)
+
+        time.sleep(0.1)
 
 def set_target():
     global target_popup_open
@@ -27,7 +55,7 @@ def set_target():
     popup = Toplevel(root)
     popup.title("Set Download Target")
     popup.iconbitmap("Internet_Usage_Monitor.ico")
-    popup.geometry("300x250")  
+    popup.geometry("350x250")  
     popup.resizable(False, False)
 
     def on_close():
@@ -37,15 +65,16 @@ def set_target():
 
     popup.protocol("WM_DELETE_WINDOW", on_close)
 
-    Label(popup, text="Enter Download Targets (e.g. 5 MB):", font=("Segoe UI", 12)).pack(pady=10)
+    Label(popup, text="Enter Download Targets (e.g. 5 MB):", font=("Segoe UI", 12)).pack(padx=0, pady=10)
 
     entries_frame = Frame(popup)
     entries_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-    entry_widgets = []
-
     def update_popup_size():
-        popup.geometry(f"300x{150 + len(entry_widgets) * 30}")
+        popup.geometry(f"350x{150 + len(entry_widgets) * 30}")
+
+    entry_widgets = [] 
+    unit_vars = []
 
     def add_entry_field(removable=True):
         if len(entry_widgets) >= 3:
@@ -56,50 +85,77 @@ def set_target():
         frame.pack(fill="x", pady=5)
 
         entry = Entry(frame, width=20, font=("Segoe UI", 10))
-        entry.grid(row=0, column=0, padx=20) 
+        entry.grid(row=0, column=0, padx=10)
+
+        unit_var = StringVar()
+        unit_combobox = ttk.Combobox(frame, textvariable=unit_var, values=["KB", "MB", "GB"], width=9, state="readonly")
+        unit_combobox.grid(row=0, column=1, padx=5)
+
+        unit_vars.append(unit_var)
+        root.after(0, lambda v=unit_var: v.set("MB"))
 
         targetadd_img = PhotoImage(file="targetadd.png")  
         targetadd_button = Button(frame, image=targetadd_img, command=add_entry_field)
         targetadd_button.image = targetadd_img
-        targetadd_button.grid(row=0, column=1, padx=0)  
+        targetadd_button.grid(row=0, column=2, padx=5)  
 
         if removable:
             targetdelete_img = PhotoImage(file="targetdelete.png")  
-            targetdelete_button = Button(frame, image=targetdelete_img, command=lambda: remove_entry(frame, entry))
+            targetdelete_button = Button(frame, image=targetdelete_img, command=lambda f=frame, e=entry, u=unit_combobox, v=unit_var: remove_entry(f, e, u, v))
             targetdelete_button.image = targetdelete_img
-            targetdelete_button.grid(row=0, column=2, padx=0) 
+            targetdelete_button.grid(row=0, column=3, padx=5) 
 
-        entry_widgets.append((entry, frame))
+        entry_widgets.append((entry, unit_combobox, frame))  
         update_popup_size()
 
-    def remove_entry(entry_frame, entry_widget):
-        entry_widgets.remove((entry_widget, entry_frame))
-        entry_frame.destroy()
-        update_popup_size()
+    def remove_entry(entry_frame, entry_widget, unit_combobox, unit_var):
+        try:
+            entry_widgets.remove((entry_widget, unit_combobox, entry_frame))
+            unit_vars.remove(unit_var)
+            entry_frame.destroy()
+            update_popup_size()
+        except ValueError:
+            print("Error: Entry not found in the list!")
 
     for _ in range(1):
         add_entry_field(removable=False)
 
     def save_targets():
-        global target_limits
+        global target_limits, max_target, target_label, progress
         try:
             target_limits = []
 
-            for entry, _ in entry_widgets:
-                text = entry.get().strip().lower()  
-                match = re.match(r"(\d+(\.\d*)?)\s*(mb|megabyte)?$", text) 
+            for entry, unit_combobox, _ in entry_widgets:
+                text = entry.get().strip().lower() 
+                unit = unit_combobox.get() 
+
+                if not text:
+                    continue
+
+                match = re.match(r"(\d+(\.\d*)?)$", text)
 
                 if match:
                     target_value = float(match.group(1))  
+
+                    if unit == "KB":
+                        target_value /= 1024
+                    elif unit == "GB":
+                        target_value *= 1024
+
                     target_limits.append(target_value)
                 else:
-                    raise ValueError 
+                    raise ValueError  
 
-            # messagebox.showinfo("Success", f"Targets saved: {target_limits}")
+            if target_limits:
+                max_target = max(target_limits) 
+                progress["maximum"] = max_target
+                target_label.config(text=f"Max Target: {max_target} MB")
+                progress["value"] = min(progress["value"], max_target)
+
             on_close()
-            
+
         except ValueError:
-            messagebox.showerror("Invalid Input", "Please enter a valid number (e.g. 5, 5MB, 5 megabyte).")
+            messagebox.showerror("Invalid Input", "Please enter a valid number.")
 
     targetsave_img = PhotoImage(file="targetsave.png")  
     targetsave_button = Button(popup, image=targetsave_img, command=save_targets)
@@ -107,16 +163,18 @@ def set_target():
     targetsave_button.pack(pady=10)
 
 def check_download_limit():
-    global downloaded_amount
+    global downloaded_amount, target_limits
     while True:
         if target_limits:
             for target in target_limits[:]:
                 if downloaded_amount >= target:
-                    threading.Thread(target=messagebox.showinfo, args=("Download Target Reached", f"Target Reached {target} MB!"), daemon=True).start()
+                    current_time3= datetime.datetime.now().strftime("%H:%M:%S")
+                    threading.Thread(target=messagebox.showinfo, args=("Download Target Reached", f"Target Reached {target} MB at {current_time3}"), daemon=True).start()
                     target_limits.remove(target)
         time.sleep(0.1)
 
 threading.Thread(target=check_download_limit, daemon=True).start()
+threading.Thread(target=update_progress, daemon=True).start()
 
 total_downloaded = 0
 total_uploaded = 0
@@ -147,7 +205,7 @@ def check_previous_session():
             session_started = False 
 
 def save_record(event=None):
-    global report_saved, session_started, downloaded_mb  
+    global report_saved, session_started, downloaded_mb, current_time  
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     downloaded_mb = total_downloaded / (1024 * 1024)
@@ -182,7 +240,7 @@ def toggle_pause():
         pause_button.config(image=pause_icon) 
 
 def setup_ui():
-    global pause_button, record_button, pause_icon, start_icon, record_icon, target_icon, target_button
+    global pause_button, record_button, pause_icon, start_icon, record_icon, target_icon, target_button, progress, target_label, progress_label
 
     button_frame = tk.Frame(root)
     button_frame.pack(pady=2)
@@ -207,6 +265,15 @@ def setup_ui():
     target_button = tk.Button(button_frame, image=target_icon, command=set_target)
     target_button.pack(side="left", padx=0)
 
+    progress = ttk.Progressbar(button_frame, length=200, mode="determinate")
+    progress.pack(side="left", padx=10)
+
+    progress_label = tk.Label(button_frame, text="0%", font=("Segoe UI", 10))
+    progress_label.pack(side="left", padx=0)
+
+    target_label = tk.Label(button_frame, text= f"Max Target: {max_target} MB", font=("Segoe UI", 10))
+    target_label.pack(side="left", padx=0)
+
 last_10_download_speeds = []
 last_10_upload_speeds = []
 
@@ -218,7 +285,7 @@ paused_time = 0
 pause_start = None
 
 def update_usage():
-    global initial_sent, initial_recv, usage_list, speed_list, time_list, start_time, elapsed_time_str
+    global initial_sent, initial_recv, usage_list, speed_list, time_list, start_time, elapsed_time_str, current_time, current_time2
     global last_recv, last_sent, last_time, total_downloaded, total_uploaded
     global total_downloaded, total_uploaded, download_speed_mb, upload_speed_mb
     global paused_time, pause_start, is_paused
@@ -234,9 +301,9 @@ def update_usage():
         paused_hours = paused_duration // 3600
         paused_minutes = (paused_duration % 3600) // 60
         paused_seconds = paused_duration % 60
-        pause_duration_str = f"⏸ {paused_hours:02}:{paused_minutes:02}:{paused_seconds:02}"
+        pause_duration_str = f"  ⏸ {paused_hours:02}:{paused_minutes:02}:{paused_seconds:02}"
 
-        timer_label.config(text=f" {pause_duration_str}        ", compound="right")
+        timer_label.config(text=f" {pause_duration_str}" + " " * 26, compound="right")
 
         root.after(100, update_usage)
         return 
@@ -311,18 +378,20 @@ def update_usage():
     avg_upload_speed_kb = avg_upload_speed / 1024
     avg_upload_speed_mb = avg_upload_speed_kb / 1024
 
-    usage_label.config(text= f"   ⬇ Downloaded:\n       {kb_recv:.3f} KB\n       {mb_recv:.3f} MB\n       {gb_recv:.3f} GB                        \n"
-                             f"   ⬆ Uploaded:\n       {kb_sent:.3f} KB\n       {mb_sent:.3f} MB                        ", compound= "right")
+    usage_label.config(text= f"   ⬇ Downloaded:\n          {kb_recv:.3f} KB\n          {mb_recv:.3f} MB\n          {gb_recv:.3f} GB\n"
+                            f"   ⬆ Uploaded:\n          {kb_sent:.3f} KB\n          {mb_sent:.3f} MB" + " " * 24, compound= "right")
     
-    timer_label.config(text= f" ⏳ {elapsed_time_str}        ", compound= "right")
+    current_time2= datetime.datetime.now().strftime("       %H:%M:%S\n\n        %Y/%m/%d")
+
+    timer_label.config(text= f"  ⏳ {elapsed_time_str} \n\n {current_time2}" + " " * 22, compound= "right")
     
     speed_label.config(text= f" ⚡Instant Speed:                  \n"
                              f"       ⬇ Download:\n              {download_speed_kb:.3f} KB/s\n              {download_speed_mb:.3f} MB/s\n"
-                             f"       ⬆ Upload:\n              {upload_speed_kb:.3f} KB/s\n              {upload_speed_mb:.3f} MB/s", compound= "right")
+                             f"       ⬆ Upload:\n              {upload_speed_kb:.3f} KB/s\n              {upload_speed_mb:.3f} MB/s" + " " * 17, compound= "right")
 
     avg_speed_label.config(text= f" ⚡Avg Speed (last 10s):      \n"
                                  f"       ⬇ Download:\n              {avg_download_speed_kb:.3f} KB/s\n              {avg_download_speed_mb:.3f} MB/s\n"
-                                 f"       ⬆ Upload:\n              {avg_upload_speed_kb:.3f} KB/s\n              {avg_upload_speed_mb:.3f} MB/s", compound= "right")
+                                 f"       ⬆ Upload:\n              {avg_upload_speed_kb:.3f} KB/s\n              {avg_upload_speed_mb:.3f} MB/s" + " " * 17, compound= "right")
 
     max_speed_label.config(text= f"🚀 Max Speed:   ⬇ Download: {max_download_speed_mb:.3f} MB/s   ⬆ Upload: {max_upload_speed_mb:.3f} MB/s  ||  Quick Report => ctrl+r", compound="right")
 
@@ -393,21 +462,21 @@ right_frame.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH)
 
 usage_icon = Image.open("usage.png")  
 usage_icon = ImageTk.PhotoImage(usage_icon)
-usage_label = tk.Label(left_frame, font=("Segoe UI", 12), height=155, width=300, image=usage_icon, bg="#E5E5FF", fg="#333333", anchor="w", justify="left")
+usage_label = tk.Label(left_frame, font=("Segoe UI", 11), height=145, width=310, image=usage_icon, bg="#E5E5FF", fg="#333333", anchor="w", justify="left")
 # usage_label.pack(pady=10)
 
 timer_icon = Image.open("timer.png")  
 timer_icon = ImageTk.PhotoImage(timer_icon)
-timer_label = tk.Label(left_frame, font=("Segoe UI", 18), height=155, width=300, image=timer_icon, bg="#FBE6FF", fg="#333333", anchor="w", justify="left")
+timer_label = tk.Label(left_frame, font=("Segoe UI", 11), height=145, width=310, image=timer_icon, bg="#FBE6FF", fg="#333333", anchor="w", justify="left")
 
 speed_icon = Image.open("speed.png")  
 speed_icon = ImageTk.PhotoImage(speed_icon)
-speed_label = tk.Label(right_frame, font=("Segoe UI", 12), height=155, width=300, image=speed_icon, bg="#DCE8DC", fg="#333333", anchor="w", justify="left")
+speed_label = tk.Label(right_frame, font=("Segoe UI", 11), height=145, width=310, image=speed_icon, bg="#DCE8DC", fg="#333333", anchor="w", justify="left")
 # speed_label.pack(pady=10)
 
 avg_speed_icon = Image.open("avg_speed.png")  
 avg_speed_icon = ImageTk.PhotoImage(avg_speed_icon)
-avg_speed_label = tk.Label(right_frame, font=("Segoe UI", 12), height=155, width=300, image=avg_speed_icon, bg="#FFE5E5", anchor="w", justify="left")
+avg_speed_label = tk.Label(right_frame, font=("Segoe UI", 11), height=145, width=310, image=avg_speed_icon, bg="#FFE5E5", fg="#333333", anchor="w", justify="left")
 
 max_speed_label = tk.Label(root, font=("Segoe UI", 10))
 max_speed_label.pack(pady=2)
@@ -446,5 +515,7 @@ check_previous_session()
 atexit.register(add_end_marker)
 
 # root.attributes('-topmost', True) 
+
+# root.after(100, lambda: unit_var.set("MB"))
 
 root.mainloop()
