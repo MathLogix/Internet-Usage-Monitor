@@ -378,20 +378,19 @@ def update_usage():
     avg_upload_speed_kb = avg_upload_speed / 1024
     avg_upload_speed_mb = avg_upload_speed_kb / 1024
 
-    usage_label.config(text= f"   ⬇ Downloaded:\n          {kb_recv:.3f} KB\n          {mb_recv:.3f} MB\n          {gb_recv:.3f} GB\n"
-                            f"   ⬆ Uploaded:\n          {kb_sent:.3f} KB\n          {mb_sent:.3f} MB" + " " * 24, compound= "right")
-    
+    usage_label.config(text= f"   ⬇ Downloaded:\n          {kb_recv:.3f} KB\n          {mb_recv:.3f} MB\n          {gb_recv:.3f} GB\n   ⬆ Uploaded:\n          {kb_sent:.3f} KB\n          {mb_sent:.3f} MB", compound= "right")
+
     current_time2= datetime.datetime.now().strftime("       %H:%M:%S\n\n        %Y/%m/%d")
 
-    timer_label.config(text= f"  ⏳ {elapsed_time_str} \n\n {current_time2}" + " " * 22, compound= "right")
-    
+    timer_label.config(text= f"  ⏳ {elapsed_time_str} \n\n {current_time2}", compound= "right")
+
     speed_label.config(text= f" ⚡Instant Speed:                  \n"
                              f"       ⬇ Download:\n              {download_speed_kb:.3f} KB/s\n              {download_speed_mb:.3f} MB/s\n"
-                             f"       ⬆ Upload:\n              {upload_speed_kb:.3f} KB/s\n              {upload_speed_mb:.3f} MB/s" + " " * 17, compound= "right")
+                             f"       ⬆ Upload:\n              {upload_speed_kb:.3f} KB/s\n              {upload_speed_mb:.3f} MB/s", compound= "right")
 
     avg_speed_label.config(text= f" ⚡Avg Speed (last 10s):      \n"
                                  f"       ⬇ Download:\n              {avg_download_speed_kb:.3f} KB/s\n              {avg_download_speed_mb:.3f} MB/s\n"
-                                 f"       ⬆ Upload:\n              {avg_upload_speed_kb:.3f} KB/s\n              {avg_upload_speed_mb:.3f} MB/s" + " " * 17, compound= "right")
+                                 f"       ⬆ Upload:\n              {avg_upload_speed_kb:.3f} KB/s\n              {avg_upload_speed_mb:.3f} MB/s", compound= "right")
 
     max_speed_label.config(text= f"🚀 Max Speed:   ⬇ Download: {max_download_speed_mb:.3f} MB/s   ⬆ Upload: {max_upload_speed_mb:.3f} MB/s  ||  Quick Report => ctrl+r", compound="right")
 
@@ -460,23 +459,53 @@ left_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
 right_frame = Frame(main_frame)
 right_frame.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH)
 
+usage_frame = Frame(left_frame, bg="#E5E5FF")
+usage_frame.pack(fill=tk.BOTH)
+
 usage_icon = Image.open("usage.png")  
 usage_icon = ImageTk.PhotoImage(usage_icon)
-usage_label = tk.Label(left_frame, font=("Segoe UI", 11), height=145, width=310, image=usage_icon, bg="#E5E5FF", fg="#333333", anchor="w", justify="left")
-# usage_label.pack(pady=10)
+
+usage_image_label = Label(usage_frame, image=usage_icon, bg="#E5E5FF")
+usage_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+
+usage_label = Label(usage_frame, font=("Segoe UI", 11), bg="#E5E5FF", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
+usage_label.pack(side=tk.RIGHT)
+
+timer_frame = Frame(left_frame, bg="#FBE6FF")
+timer_frame.pack(fill=tk.BOTH)
 
 timer_icon = Image.open("timer.png")  
 timer_icon = ImageTk.PhotoImage(timer_icon)
-timer_label = tk.Label(left_frame, font=("Segoe UI", 11), height=145, width=310, image=timer_icon, bg="#FBE6FF", fg="#333333", anchor="w", justify="left")
+
+timer_image_label = Label(timer_frame, image=timer_icon, bg="#FBE6FF")
+timer_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+
+timer_label = Label(timer_frame, font=("Segoe UI", 11), bg="#FBE6FF", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
+timer_label.pack(side=tk.RIGHT)
+
+speed_frame = Frame(right_frame, bg="#DCE8DC")
+speed_frame.pack(fill=tk.BOTH)
 
 speed_icon = Image.open("speed.png")  
 speed_icon = ImageTk.PhotoImage(speed_icon)
-speed_label = tk.Label(right_frame, font=("Segoe UI", 11), height=145, width=310, image=speed_icon, bg="#DCE8DC", fg="#333333", anchor="w", justify="left")
-# speed_label.pack(pady=10)
+
+speed_image_label = Label(speed_frame, image=speed_icon, bg="#DCE8DC")
+speed_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+
+speed_label = Label(speed_frame, font=("Segoe UI", 11), bg="#DCE8DC", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
+speed_label.pack(side=tk.RIGHT)
+
+avg_speed_frame = Frame(right_frame, bg="#FFE5E5")
+avg_speed_frame.pack(fill=tk.BOTH)
 
 avg_speed_icon = Image.open("avg_speed.png")  
 avg_speed_icon = ImageTk.PhotoImage(avg_speed_icon)
-avg_speed_label = tk.Label(right_frame, font=("Segoe UI", 11), height=145, width=310, image=avg_speed_icon, bg="#FFE5E5", fg="#333333", anchor="w", justify="left")
+
+avg_speed_image_label = Label(avg_speed_frame, image=avg_speed_icon, bg="#FFE5E5")
+avg_speed_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+
+avg_speed_label = Label(avg_speed_frame, font=("Segoe UI", 11), bg="#FFE5E5", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
+avg_speed_label.pack(side=tk.RIGHT)
 
 max_speed_label = tk.Label(root, font=("Segoe UI", 10))
 max_speed_label.pack(pady=2)
