@@ -26,7 +26,7 @@ def update_progress():
         if target_limits:
             max_target = max(target_limits) 
             progress["maximum"] = max_target
-            progress["value"] = downloaded_amount
+            progress["value"] = max(downloaded_amount, 0)
 
             if max_target > 0:
                 progress_percent = (downloaded_amount / max_target) * 100
@@ -205,7 +205,7 @@ def check_previous_session():
             session_started = False 
 
 def save_record(event=None):
-    global report_saved, session_started, downloaded_mb, current_time  
+    global report_saved, session_started, downloaded_mb, current_time, total_downloaded  
 
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     downloaded_mb = total_downloaded / (1024 * 1024)
@@ -323,8 +323,21 @@ def update_usage():
     elapsed_time_str = f"{elapsed_hours:02}:{elapsed_minutes:02}:{elapsed_seconds:02}"
 
     current_sent, current_recv = get_internet_usage()
+
+    if current_recv < initial_recv:
+        initial_recv = current_recv
+
+    if current_sent < initial_sent:
+        initial_sent = current_sent
+
     total_sent = current_sent - initial_sent
     total_recv = current_recv - initial_recv
+
+    if current_recv < last_recv:
+        last_recv = current_recv  
+
+    if current_sent < last_sent:
+        last_sent = current_sent  
 
     kb_recv = total_recv / 1024
     mb_recv = kb_recv / 1024
@@ -432,11 +445,13 @@ def update_usage():
     root.after(100, update_usage)
 
 initial_sent, initial_recv = get_internet_usage()
+start_time = time.time()
+
 usage_list = []
 speed_list = []
 upload_speed_list = []
 time_list = []
-start_time = time.time()
+
 last_recv = initial_recv
 last_sent = initial_sent
 last_time = start_time
