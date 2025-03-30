@@ -25,4 +25,5 @@ The program automatically tracks the download amount and notifies you when the t
 
 Click the 📄 Report button to save a usage report.
 
+
 ![Internet-Usage-Monitor Icon](Screenshot.png)
