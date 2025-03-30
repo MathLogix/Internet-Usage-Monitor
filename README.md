@@ -6,9 +6,13 @@ This program is an Internet usage tracker that monitors download and upload amou
 
 ## Features:
 ✅ Real-time display of download and upload usage
+
 ✅ Set download targets with notifications upon reaching them
+
 ✅ Save internet usage reports to a text file
+
 ✅ Pause and resume monitoring
+
 ✅ Show download progress percentage relative to the target
 
 ## How to Use:
