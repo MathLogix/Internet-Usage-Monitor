@@ -8,45 +8,72 @@ import time
 import threading
 from PIL import Image, ImageTk
 import os
+import ctypes
+import subprocess
 import datetime
 import atexit
 import re
+import platform
+import jdatetime
 
 max_target = 0
-target_limits = []
 target_popup_open = False
+popup = None
 downloaded_amount = 0
 downloaded_mb = 0
 progress = None
+shutdown_target = None
+notification_targets = []
+shutdown_targets = []
+target_type_dropdown = None
 
 def update_progress():
-    global downloaded_amount, progress, target_limits, max_target, target_label, progress_label
+    global downloaded_amount, progress, max_target, target_label, progress_label, shutdown_target, notification_targets, shutdown_targets
 
-    while True:
-        if target_limits:
-            max_target = max(target_limits) 
+    def refresh_download_ui():
+        if progress is None or progress_label is None or target_label is None:
+            return
+
+        if notification_targets or shutdown_targets:
+            all_targets = notification_targets + shutdown_targets
+            max_target = max(all_targets) if all_targets else 0
             progress["maximum"] = max_target
             progress["value"] = max(downloaded_amount, 0)
 
             if max_target > 0:
-                progress_percent = (downloaded_amount / max_target) * 100
-                progress_percent = min(100, progress_percent)
-                progress_label.config(text=f"{progress_percent:.1f}%")
+                percent = min(100, (downloaded_amount / max_target) * 100)
+                progress_label.config(text=f"{percent:.1f}%")
             else:
                 progress_label.config(text="0%")
 
             target_label.config(text=f"Max Target: {max_target:.2f} MB")
 
-            for target in target_limits[:]:
+            for target in shutdown_targets[:]:
                 if downloaded_amount >= target:
-                    current_time3= datetime.datetime.now().strftime("%H:%M:%S")
-                    messagebox.showinfo("Download Target Reached", f"Target Reached {target} MB at {current_time3}")
-                    target_limits.remove(target)
+                    shutdown_targets.remove(target)
+                    threading.Thread(target=shutdown_system(shutdown_type.get()), daemon=True).start()
+                    break
+        else:
+            progress["value"] = 0
+            progress["maximum"] = 100
+            progress_label.config(text="0%")
+            target_label.config(text="No active targets.")
 
-        time.sleep(0.1)
+    # while True:
+    #     if progress and progress_label and target_label:
+    #         progress.after(0, refresh_download_ui)
+    #     time.sleep(0.1)
+
+    refresh_download_ui()
+    if root.winfo_exists():
+        progress.after(100, update_progress)
 
 def set_target():
-    global target_popup_open
+    global target_popup_open, popup
+
+    if target_popup_open and popup is not None and popup.winfo_exists():
+        popup.lift()
+        return
 
     if target_popup_open:
         return  
@@ -55,7 +82,7 @@ def set_target():
     popup = Toplevel(root)
     popup.title("Set Download Target")
     popup.iconbitmap("Internet_Usage_Monitor.ico")
-    popup.geometry("350x250")  
+    popup.geometry("350x250") 
     popup.resizable(False, False)
 
     def on_close():
@@ -75,6 +102,7 @@ def set_target():
 
     entry_widgets = [] 
     unit_vars = []
+    # target_type_vars =[]
 
     def add_entry_field(removable=True):
         if len(entry_widgets) >= 3:
@@ -90,28 +118,34 @@ def set_target():
         unit_var = StringVar()
         unit_combobox = ttk.Combobox(frame, textvariable=unit_var, values=["KB", "MB", "GB"], width=9, state="readonly")
         unit_combobox.grid(row=0, column=1, padx=5)
-
         unit_vars.append(unit_var)
         root.after(0, lambda v=unit_var: v.set("MB"))
 
+        # target_type_var = StringVar()
+        # target_type_combobox = ttk.Combobox(frame, textvariable=target_type_var, values=["Notification", "Shutdown"], width=15, state="readonly")
+        # target_type_combobox.grid(row=0, column=2, padx=5)
+        # target_type_vars.append(target_type_var)
+        # root.after(0, lambda v=target_type_var: v.set("Notification"))
+        target_type_combobox = None
+
         targetadd_img = PhotoImage(file="targetadd.png")  
-        targetadd_button = Button(frame, image=targetadd_img, command=add_entry_field)
+        targetadd_button = Button(frame, image=targetadd_img, command=add_entry_field, cursor="hand2")
         targetadd_button.image = targetadd_img
-        targetadd_button.grid(row=0, column=2, padx=5)  
+        targetadd_button.grid(row=0, column=2, padx=5)
 
         if removable:
-            targetdelete_img = PhotoImage(file="targetdelete.png")  
-            targetdelete_button = Button(frame, image=targetdelete_img, command=lambda f=frame, e=entry, u=unit_combobox, v=unit_var: remove_entry(f, e, u, v))
-            targetdelete_button.image = targetdelete_img
-            targetdelete_button.grid(row=0, column=3, padx=5) 
+            delete_img = PhotoImage(file="targetdelete.png")
+           # # delete_button = Button(frame, image=delete_img, command=lambda f=frame: remove_entry(f, entry, unit_combobox, target_type_combobox), cursor="hand2")
+            delete_button = Button(frame, image=delete_img, command=lambda f=frame, e=entry, u=unit_combobox, t=target_type_combobox: remove_entry(f, e, u, t), cursor="hand2")
+            delete_button.image = delete_img
+            delete_button.grid(row=0, column=3, padx=5)
 
-        entry_widgets.append((entry, unit_combobox, frame))  
+        entry_widgets.append((entry, unit_combobox, None))
         update_popup_size()
 
-    def remove_entry(entry_frame, entry_widget, unit_combobox, unit_var):
+    def remove_entry(entry_frame, entry_widget, unit_combobox, target_type_combobox):
         try:
-            entry_widgets.remove((entry_widget, unit_combobox, entry_frame))
-            unit_vars.remove(unit_var)
+            entry_widgets.remove((entry_widget, unit_combobox, target_type_combobox))
             entry_frame.destroy()
             update_popup_size()
         except ValueError:
@@ -121,13 +155,17 @@ def set_target():
         add_entry_field(removable=False)
 
     def save_targets():
-        global target_limits, max_target, target_label, progress
+        global notification_targets, shutdown_targets, max_target, target_label, progress, downloaded_amount
         try:
-            target_limits = []
-
+            notification_targets = []
+            
+            # print("entry_widgets:", entry_widgets)
+            # for i, w in enumerate(entry_widgets):
+            #     print(f"{i}: {[type(x) for x in w]}\n\n")
+            
             for entry, unit_combobox, _ in entry_widgets:
                 text = entry.get().strip().lower() 
-                unit = unit_combobox.get() 
+                unit = unit_combobox.get()
 
                 if not text:
                     continue
@@ -142,39 +180,51 @@ def set_target():
                     elif unit == "GB":
                         target_value *= 1024
 
-                    target_limits.append(target_value)
+                    if downloaded_amount >= target_value:
+                        target_value += downloaded_amount
+                    
+                    notification_targets.append(target_value)
                 else:
-                    raise ValueError  
+                    raise ValueError("Invalid number format")
 
-            if target_limits:
-                max_target = max(target_limits) 
-                progress["maximum"] = max_target
-                target_label.config(text=f"Max Target: {max_target} MB")
-                progress["value"] = min(progress["value"], max_target)
+            max_target = max(notification_targets + shutdown_targets) if notification_targets + shutdown_targets else 0
+            progress["maximum"] = max_target
+            progress["value"] = min(progress["value"], max_target)
+            target_label.config(text=f"Max Target: {max_target:.2f} MB")
 
             on_close()
 
         except ValueError:
-            messagebox.showerror("Invalid Input", "Please enter a valid number.")
+            messagebox.showerror("Invalid Input", "Please enter valid values for the targets.")
 
     targetsave_img = PhotoImage(file="targetsave.png")  
-    targetsave_button = Button(popup, image=targetsave_img, command=save_targets)
+    targetsave_button = Button(popup, image=targetsave_img, command=save_targets, cursor="hand2")
     targetsave_button.image = targetsave_img
     targetsave_button.pack(pady=10)
 
+def show_info_popup(target):
+    current_time3 = datetime.datetime.now().strftime("%H:%M:%S")
+    messagebox.showinfo("Download Target Reached", f"Target Reached {target:.2f} MB at {current_time3}")
+
 def check_download_limit():
-    global downloaded_amount, target_limits
+    global downloaded_amount, notification_targets, shutdown_targets
     while True:
-        if target_limits:
-            for target in target_limits[:]:
+        if notification_targets:
+            for target in notification_targets[:]:
                 if downloaded_amount >= target:
-                    current_time3= datetime.datetime.now().strftime("%H:%M:%S")
-                    threading.Thread(target=messagebox.showinfo, args=("Download Target Reached", f"Target Reached {target} MB at {current_time3}"), daemon=True).start()
-                    target_limits.remove(target)
+                    notification_targets.remove(target)
+                    threading.Thread(target=lambda: root.after(0, show_info_popup, target), daemon=True).start()
+
+        if shutdown_targets:
+            for target in shutdown_targets[:]:
+                if downloaded_amount >= target:
+                    shutdown_targets.remove(target)
+                    threading.Thread(target=shutdown_system(shutdown_type.get()), daemon=True).start()
+
         time.sleep(0.1)
 
 threading.Thread(target=check_download_limit, daemon=True).start()
-threading.Thread(target=update_progress, daemon=True).start()
+# threading.Thread(target=update_progress, daemon=True).start()
 
 total_downloaded = 0
 total_uploaded = 0
@@ -235,9 +285,9 @@ def toggle_pause():
     is_paused = not is_paused 
 
     if is_paused:
-        pause_button.config(image=start_icon) 
+        pause_button.config(image=start_icon, cursor="hand2") 
     else:
-        pause_button.config(image=pause_icon) 
+        pause_button.config(image=pause_icon, cursor="hand2") 
 
 def setup_ui():
     global pause_button, record_button, pause_icon, start_icon, record_icon, target_icon, target_button, progress, target_label, progress_label
@@ -254,15 +304,15 @@ def setup_ui():
     record_icon = Image.open("report.png")  
     record_icon = ImageTk.PhotoImage(record_icon)
 
-    pause_button = tk.Button(button_frame, image=pause_icon, command=toggle_pause)
+    pause_button = tk.Button(button_frame, image=pause_icon, command=toggle_pause, cursor="hand2")
     pause_button.pack(side="left", padx=0)
     
-    record_button = tk.Button(button_frame, image=record_icon, command=save_record)
+    record_button = tk.Button(button_frame, image=record_icon, command=save_record, cursor="hand2")
     record_button.pack(side="left", padx=0)
 
     target_icon = Image.open("target.png")  
     target_icon = ImageTk.PhotoImage(target_icon)
-    target_button = tk.Button(button_frame, image=target_icon, command=set_target)
+    target_button = tk.Button(button_frame, image=target_icon, command=set_target, cursor="hand2")
     target_button.pack(side="left", padx=0)
 
     progress = ttk.Progressbar(button_frame, length=200, mode="determinate")
@@ -285,12 +335,12 @@ paused_time = 0
 pause_start = None
 
 def update_usage():
-    global initial_sent, initial_recv, usage_list, speed_list, time_list, start_time, elapsed_time_str, current_time, current_time2
+    global initial_sent, initial_recv, usage_list, speed_list, time_list, start_time, elapsed_time_str, current_time, current_time2, current_time3
     global last_recv, last_sent, last_time, total_downloaded, total_uploaded
     global total_downloaded, total_uploaded, download_speed_mb, upload_speed_mb
     global paused_time, pause_start, is_paused
     global max_download_speed_mb, max_upload_speed_mb
-    global downloaded_amount
+    global downloaded_amount, remaining
 
     elapsed_time_str = "00:00:00"
     if is_paused:
@@ -393,9 +443,31 @@ def update_usage():
 
     usage_label.config(text= f"   ⬇ Downloaded:\n          {kb_recv:.3f} KB\n          {mb_recv:.3f} MB\n          {gb_recv:.3f} GB\n   ⬆ Uploaded:\n          {kb_sent:.3f} KB\n          {mb_sent:.3f} MB", compound= "right")
 
-    current_time2= datetime.datetime.now().strftime("       %H:%M:%S\n\n        %Y/%m/%d")
+    current_time2= datetime.datetime.now().strftime(" %H:%M:%S")
+    current_time3= datetime.datetime.now().strftime(" %Y/%m/%d")
 
-    timer_label.config(text= f"  ⏳ {elapsed_time_str} \n\n {current_time2}", compound= "right")
+    if remaining is not None and remaining < 0:
+        remaining = 0
+
+    if not shutdown_active or shutdown_mode is None:
+        timer_label.config(text=f"    ⏳ {elapsed_time_str} \n\n    🕒{current_time2} \n\n    🗓{current_time3}", compound="right")
+
+    else:
+        if shutdown_mode == "date":
+            if target_time and remaining > 0:
+                remaining_time_str = f"{int(remaining // 3600):02}:{int((remaining % 3600) // 60):02}:{int(remaining % 60):02}"
+                target_display = target_time.strftime("%Y/%m/%d   %H:%M:%S")
+                timer_label.config(text=f"    🎯 {target_display}\n\n    ⚠️ {remaining_time_str}  ({selected_shutdown_type})\n\n    ⏳ {elapsed_time_str}", compound="right")
+            else:
+                timer_label.config(text=f"    ⏳ {elapsed_time_str} \n\n    🕒{current_time2} \n\n    🗓{current_time3}", compound="right")
+
+        elif shutdown_mode == "download":
+            if target_time and remaining > 0:
+                remaining_time_str = f"{int(remaining // 3600):02}:{int((remaining % 3600) // 60):02}:{int(remaining % 60):02}"
+                target_display = target_time.strftime("%Y/%m/%d   %H:%M:%S")
+                timer_label.config(text=f"    🎯 {target_display}\n\n    ⚠️ {remaining_time_str}  ({selected_shutdown_type})\n\n    ⏳ {elapsed_time_str}", compound="right")
+            else:
+                timer_label.config(text=f"    ⏳ {elapsed_time_str} \n\n    🕒{current_time2}  ({selected_shutdown_type}) \n\n    🗓{current_time3}", compound="right")
 
     speed_label.config(text= f" ⚡Instant Speed:                  \n"
                              f"       ⬇ Download:\n              {download_speed_kb:.3f} KB/s\n              {download_speed_mb:.3f} MB/s\n"
@@ -444,6 +516,395 @@ def update_usage():
     canvas.draw()
     root.after(100, update_usage)
 
+global remaining, remaining_time_str, shutdown_thread, shutdown_active, target_time, shutdown_mode, cancel_button
+remaining = 0
+shutdown_thread = None
+shutdown_active = False
+target_time = None
+shutdown_mode = "date"
+shutdown_window_open = False
+shutdown_win = None
+
+# def shutdown_system():
+#     os_type = platform.system()
+#     if os_type == "Windows":
+#         os.system("shutdown /s /t 1")
+#     elif os_type == "Linux" or os_type == "Darwin":
+#         os.system("shutdown now")
+#     else:
+#         messagebox.showerror("Unsupported OS", "Your operating system is not supported for shutdown.")
+
+def shutdown_system(shutdown_mode):
+    os_type = platform.system()
+
+    try:
+        if os_type != "Windows":
+            messagebox.showerror("Unsupported OS", "This feature currently supports Windows only.")
+            return
+
+        if shutdown_mode == "Shutdown":
+            os.system("shutdown /s /t 1")
+        elif shutdown_mode == "Hibernate":
+            os.system("shutdown /h")
+        elif shutdown_mode == "Sleep":
+            os.system("rundll32.exe powrprof.dll,SetSuspendState 0,0,0")
+        elif shutdown_mode == "Sleep":
+            os.system("powercfg -hibernate off")
+            ctypes.windll.PowrProf.SetSuspendState(0, 0, 0)
+            os.system("powercfg -hibernate on")
+        # elif shutdown_mode == "Sleep":
+        #     os.system("rundll32.exe powrprof.dll,SetSuspendState Sleep")
+        # elif shutdown_mode == "Sleep":
+        #     os.system("rundll32.exe powrprof.dll,SetSuspendState 0,0,0")
+        elif shutdown_mode == "Restart":
+            os.system("shutdown /r /t 1")
+        else:
+            messagebox.showerror("Invalid Option", "Unknown shutdown type selected.")
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+# def apply_shutdown():
+#     selected_type = shutdown_type.get()
+#     selected_plan = shutdown_plan.get()
+
+#     confirm = messagebox.askyesno("Confirm", f"Apply plan: {selected_type} → {selected_plan}?\n\nThis will execute immediately.")
+
+#     if confirm:
+#         shutdown_system(selected_type)
+
+def open_shutdown_window():
+    global shutdown_thread, shutdown_active, remaining, target_time, shutdown_win, cancel_button, target_type, shutdown_target, target_type_dropdown
+    global shutdown_window_open, shutdown_win
+
+    if shutdown_window_open and shutdown_win is not None and shutdown_win.winfo_exists():
+        shutdown_win.lift()
+        return
+
+    shutdown_window_open = True
+
+    shutdown_win = Toplevel()
+    shutdown_win.title("Auto Shutdown Scheduler")
+    shutdown_win.iconbitmap("Internet_Usage_Monitor.ico")
+    shutdown_win.geometry("400x250")
+    shutdown_win.resizable(False, False)
+
+    def on_close_shutdown():
+        global shutdown_window_open, shutdown_win
+        shutdown_window_open = False
+        if shutdown_win is not None:
+            shutdown_win.destroy()
+            shutdown_win = None
+        
+    shutdown_win.protocol("WM_DELETE_WINDOW", on_close_shutdown)
+
+    target_entry = None
+    target_unit = None
+    date_entry = None
+    time_entry = None
+    calendar_dropdown = None
+    calendar_type = None
+    target_type = None
+    
+    def schedule_shutdown(target_datetime):
+        global remaining, shutdown_thread, shutdown_active, target_time
+        global shutdown_window_open
+        now = datetime.datetime.now()
+        target_time = target_datetime
+
+        if target_time <= now:
+            messagebox.showerror("Invalid Time", "Selected time must be in the future.")
+            return False
+
+        remaining = (target_time - now).total_seconds()
+        shutdown_active = True
+        cancel_button.config(state="normal")
+
+        def countdown():
+            global remaining, shutdown_active
+            global shutdown_window_open, shutdown_win
+            while remaining > 0 and shutdown_active:
+                time.sleep(1)
+                remaining -= 1
+            if shutdown_active:
+                shutdown_active = False
+                try:
+                    if shutdown_win is not None and shutdown_win.winfo_exists():
+                        shutdown_window_open = False
+                        shutdown_win.destroy()
+                        shutdown_win = None
+                except:
+                    pass
+                shutdown_system(shutdown_type.get())
+
+        shutdown_thread = threading.Thread(target=countdown, daemon=True)
+        shutdown_thread.start()
+        return True
+
+    def cancel_shutdown():
+        global shutdown_active, remaining, shutdown_targets, shutdown_target
+        global shutdown_window_open, shutdown_win
+        shutdown_active = False
+        remaining = 0
+        
+        if shutdown_target in shutdown_targets:
+            shutdown_targets.remove(shutdown_target)
+
+        shutdown_target = None
+        cancel_button.config(state="disabled")
+        shutdown_win.destroy()
+        shutdown_window_open = False
+        shutdown_win = None
+
+    def on_submit():
+        global cancel_button
+        global shutdown_targets, max_target, downloaded_amount, shutdown_target
+        global shutdown_window_open, shutdown_win, selected_shutdown_type
+
+        mode = shutdown_plan.get()
+        selected_shutdown_type = shutdown_type.get()
+
+        try:
+            if mode == "On specific date":
+                if not date_entry or not time_entry or not calendar_type:
+                    messagebox.showerror("Error", "Date/time inputs are not available.")
+                    return
+
+                date_str = date_entry.get()
+                time_str = time_entry.get()
+
+                if calendar_type.get() == "Solar":
+                    j_date = jdatetime.datetime.strptime(date_str + " " + time_str, "%Y/%m/%d %H:%M:%S")
+                    g_date = j_date.togregorian()
+                    target_datetime = g_date
+                else:
+                    target_datetime = datetime.datetime.strptime(date_str + " " + time_str, "%Y/%m/%d %H:%M:%S")
+
+                result = schedule_shutdown(target_datetime)
+                if result:
+                    shutdown_active = True
+                    cancel_button.config(state="normal")
+                    shutdown_win.destroy()
+                    shutdown_win = None
+                    shutdown_window_open = False
+
+            elif mode == "On download target":
+                if not target_entry or not target_unit:
+                    messagebox.showerror("Error", "Download target inputs are not available.")
+                    return
+
+                try:
+                    value = float(target_entry.get())
+                    unit = target_unit.get()
+                    if unit == "KB":
+                        value /= 1024
+                    elif unit == "GB":
+                        value *= 1024
+
+                    if target_type.get() == "Incremental Download":
+                        max_target = downloaded_amount + value
+                    else:
+                        if value <= downloaded_amount:
+                            messagebox.showerror("Invalid Target", f"Target {value:.2f} MB must be greater than already downloaded {downloaded_amount:.2f} MB.")
+                            return
+                        max_target = value
+
+                    shutdown_target = max_target
+
+                    if shutdown_target not in shutdown_targets:
+                        shutdown_targets.append(shutdown_target)
+
+                    shutdown_active = True
+                    cancel_button.config(state="normal")
+                    # shutdown_win.withdraw()
+                    shutdown_win.destroy()
+                    shutdown_win = None
+                    shutdown_window_open = False 
+
+                    def monitor_download_target():
+                        global shutdown_active
+                        shutdown_active = True
+                        
+                        # cancel_button.config(state="normal")
+                        try:
+                            if cancel_button.winfo_exists():
+                                cancel_button.after(0, lambda: cancel_button.config(state="normal"))
+                        except:
+                            pass
+                        # cancel_button.after(0, lambda: cancel_button.config(state="normal"))
+
+                        while shutdown_active:
+                            try:
+                                if downloaded_amount >= shutdown_target:
+                                    shutdown_active = False
+                                    try:
+                                        if shutdown_win is not None and shutdown_win.winfo_exists():
+                                            shutdown_win.destroy()
+                                            shutdown_win = None
+                                            shutdown_window_open = False
+                                    except:
+                                        pass
+                                    shutdown_system(shutdown_type.get())
+                                    break
+                                time.sleep(1)
+                            except:
+                                break
+
+                    threading.Thread(target=monitor_download_target, daemon=True).start()                   
+
+                except ValueError:
+                    messagebox.showerror("Invalid Input", "Enter a valid download target value.")
+
+        except ValueError:
+            messagebox.showerror("Input Error", "Please enter a valid date and time in format:\nYYYY/MM/DD and HH:MM:SS")
+
+    def update_ui(*args):
+        global shutdown_mode, target_type, target_type_dropdown  
+        nonlocal date_entry, time_entry, calendar_dropdown, calendar_type, target_entry, target_unit
+        for widget in frame.winfo_children():
+            widget.destroy()
+
+        if shutdown_plan.get() == "On specific date":
+            shutdown_mode = "date"
+            shutdown_win.geometry("400x265")
+
+            tk.Label(frame, text="Date (YYYY/MM/DD):", font=("Segoe UI", 12)).grid(row=0, column=0, padx=5, pady=5)
+            date_entry = tk.Entry(frame, width=10, font=("Segoe UI", 12), justify="center")
+            date_entry.grid(row=0, column=1, padx=5)
+
+            calendar_type = tk.StringVar(value="Gregorian")
+            calendar_dropdown = ttk.Combobox(frame, textvariable=calendar_type, values=["Gregorian", "Solar"], width=11, state="readonly", font=("Segoe UI", 10))
+            calendar_dropdown.grid(row=0, column=2, padx=5)
+
+            def update_date_entry(*args):
+                now = datetime.datetime.now()
+                if calendar_type.get() == "Gregorian":
+                    date_entry.delete(0, tk.END)
+                    date_entry.insert(0, now.strftime("%Y/%m/%d"))
+                else:
+                    jalali_date = jdatetime.date.fromgregorian(date=now.date())
+                    date_entry.delete(0, tk.END)
+                    date_entry.insert(0, jalali_date.strftime("%Y/%m/%d"))
+
+            calendar_dropdown.bind("<<ComboboxSelected>>", update_date_entry)
+            update_date_entry()
+
+            tk.Label(frame, text="Time (HH:MM:SS):", font=("Segoe UI", 12)).grid(row=1, column=0, padx=5, pady=5)
+            time_entry = tk.Entry(frame, width=10, font=("Segoe UI", 12), justify="center")
+            time_entry.insert(0, "00:00:00")
+            time_entry.grid(row=1, column=1, padx=5)
+
+            def update_time_entry(option):
+                now = datetime.datetime.now()
+
+                if option == "Now":
+                    selected_time = now
+                elif option == "+30 Minutes":
+                    selected_time = now + datetime.timedelta(minutes=30)
+                elif option == "+1 Hour":
+                    selected_time = now + datetime.timedelta(hours=1)
+                elif option == "+1.5 Hours":
+                    selected_time = now + datetime.timedelta(hours=1.5)
+                elif option == "+2 Hours":
+                    selected_time = now + datetime.timedelta(hours=2)
+                elif option == "+3 Hours":
+                    selected_time = now + datetime.timedelta(hours=3)
+                elif option == "+4 Hours":
+                    selected_time = now + datetime.timedelta(hours=4)
+                elif option == "+5 Hours":
+                    selected_time = now + datetime.timedelta(hours=5)
+                else:
+                    return
+                
+                formatted_time = selected_time.strftime("%H:%M:%S")
+                time_entry.delete(0, tk.END)
+                time_entry.insert(0, formatted_time)
+
+            preset_options = ttk.Combobox(frame, width=11, font=("Segoe UI", 10), state="readonly")
+            preset_options['values'] = ["Now", "+30 Minutes", "+1 Hour", "+1.5 Hours", "+2 Hours", "+3 Hours", "+4 Hours", "+5 Hours"]
+            preset_options.set("Preset Times")
+            preset_options.grid(row=1, column=2, padx=5)
+            preset_options.bind("<<ComboboxSelected>>", lambda e: update_time_entry(preset_options.get()))
+
+        else:
+            shutdown_mode = "download"
+            shutdown_win.geometry("400x265")
+            tk.Label(frame, text="Target Download:", font=("Segoe UI", 12)).grid(row=0, column=0, padx=5, pady=5)
+            target_entry = tk.Entry(frame, width=10, font=("Segoe UI", 12), justify="center")
+            target_entry.grid(row=0, column=1, padx=5)
+            target_unit = tk.StringVar(value="MB")
+            target_dropdown = ttk.Combobox(frame, textvariable=target_unit, values=["KB", "MB", "GB"], width=5, state="readonly", font=("Segoe UI", 10))
+            target_dropdown.grid(row=0, column=2, padx=5)
+            tk.Label(frame, text="Target Type:", font=("Segoe UI", 12)).grid(row=1, column=0, padx=5, pady=5)
+            target_type = tk.StringVar(value="Total Download")
+            target_type_dropdown = ttk.Combobox(frame, textvariable=target_type, values=["Total Download", "Incremental Download"], width=20, state="readonly", font=("Segoe UI", 10))
+            target_type_dropdown.grid(row=1, column=1, columnspan=2, padx=5)
+
+    tk.Label(shutdown_win, text="Schedule System Shutdown", font=("Segoe UI", 14, "bold")).pack(pady=3)
+    tk.Label(shutdown_win, text="Choose Your Plan:", font=("Segoe UI", 12)).pack(pady=3)
+   
+    combo_frame = tk.Frame(shutdown_win)
+    combo_frame.pack(pady=5)
+
+    # tk.Label(combo_frame, text="Trigger:", font=("Segoe UI", 10)).grid(row=0, column=0, padx=(15, 5))
+    shutdown_plan = tk.StringVar(value="On specific date")
+    plan_dropdown = ttk.Combobox(combo_frame, textvariable=shutdown_plan, values=["On specific date", "On download target"], state="readonly", font=("Segoe UI", 10), width=18)
+    plan_dropdown.grid(row=0, column=1, padx=5)
+    plan_dropdown.bind("<<ComboboxSelected>>", update_ui)
+
+    # tk.Label(combo_frame, text="Type:", font=("Segoe UI", 10)).grid(row=0, column=2, padx=(0, 5))
+    shutdown_type = tk.StringVar(value="Shutdown")
+    type_dropdown = ttk.Combobox(combo_frame, textvariable=shutdown_type, values=["Shutdown", "Hibernate", "Sleep", "Restart"], state="readonly", font=("Segoe UI", 10), width=9)
+    type_dropdown.grid(row=0, column=3, padx=5)
+
+    frame = tk.Frame(shutdown_win)
+    frame.pack(pady=5)
+
+    update_ui()
+
+    button_frame = tk.Frame(shutdown_win)
+    button_frame.pack(pady=5)
+
+    shutdown_win.shutdown_icon = ImageTk.PhotoImage(Image.open("shutdown.png"))
+    shutdown_button = tk.Button(button_frame, image=shutdown_win.shutdown_icon, command=on_submit, cursor="hand2")
+    shutdown_button.pack(side="left", padx=0)
+
+    shutdown_win.cancel_icon = ImageTk.PhotoImage(Image.open("cancel.png"))
+    cancel_button = tk.Button(button_frame, image=shutdown_win.cancel_icon, command=cancel_shutdown, cursor="hand2")
+    cancel_button.pack(side="left", padx=0)
+
+    if shutdown_active:
+        cancel_button.config(state="normal")
+    else:
+        cancel_button.config(state="disabled")
+
+def check_wifi_status():
+    try:
+        result = subprocess.run('netsh interface show interface "Wi-Fi"', capture_output=True, text=True, shell=True)
+
+        if "Connected" in result.stdout:
+            return True
+        else:
+            return False
+    except Exception as e:
+        messagebox.showerror("Error", f"Error: {str(e)}")
+        return False
+
+def terminate_network_connection():
+    is_connected = check_wifi_status()
+
+    confirm = messagebox.askyesno("Confirm Termination", f"Are you sure you want to {'terminate' if is_connected else 'reconnect'} all network connections?\nThis will execute immediately.")
+
+    if confirm:
+        try:
+            if is_connected:
+                os.system('netsh interface set interface "Wi-Fi" disable') 
+                messagebox.showinfo("Network Connection", "Internet connection has been terminated.")
+            else:
+                os.system('netsh interface set interface "Wi-Fi" enable')
+                messagebox.showinfo("Network Connection", "Internet connection has been restored.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error: {str(e)}")
+            
 initial_sent, initial_recv = get_internet_usage()
 start_time = time.time()
 
@@ -480,8 +941,9 @@ usage_frame.pack(fill=tk.BOTH)
 usage_icon = Image.open("usage.png")  
 usage_icon = ImageTk.PhotoImage(usage_icon)
 
-usage_image_label = Label(usage_frame, image=usage_icon, bg="#E5E5FF")
+usage_image_label = Label(usage_frame, image=usage_icon, bg="#E5E5FF", cursor="hand2")
 usage_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+usage_image_label.bind("<Button-1>", lambda event: terminate_network_connection())
 
 usage_label = Label(usage_frame, font=("Segoe UI", 11), bg="#E5E5FF", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
 usage_label.pack(side=tk.RIGHT)
@@ -492,8 +954,9 @@ timer_frame.pack(fill=tk.BOTH)
 timer_icon = Image.open("timer.png")  
 timer_icon = ImageTk.PhotoImage(timer_icon)
 
-timer_image_label = Label(timer_frame, image=timer_icon, bg="#FBE6FF")
+timer_image_label = Label(timer_frame, image=timer_icon, bg="#FBE6FF", cursor="hand2")
 timer_image_label.pack(side=tk.RIGHT, padx=15, pady=25)
+timer_image_label.bind("<Button-1>", lambda event: open_shutdown_window())
 
 timer_label = Label(timer_frame, font=("Segoe UI", 11), bg="#FBE6FF", fg="#333333", anchor="w", justify=tk.LEFT, width=23, height=7)
 timer_label.pack(side=tk.RIGHT)
@@ -555,6 +1018,7 @@ canvas = FigureCanvasTkAgg(fig, master=root)
 canvas.get_tk_widget().pack()
 
 update_usage()
+update_progress()
 check_previous_session()
 atexit.register(add_end_marker)
 
