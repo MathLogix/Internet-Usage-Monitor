@@ -877,6 +877,12 @@ def open_shutdown_window():
     else:
         cancel_button.config(state="disabled")
 
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
 def check_wifi_status():
     try:
         result = subprocess.run('netsh interface show interface "Wi-Fi"', capture_output=True, text=True, shell=True)
@@ -890,9 +896,12 @@ def check_wifi_status():
         return False
 
 def terminate_network_connection():
+    if not is_admin():
+        messagebox.showwarning("Administrator Required", "This feature requires administrator privileges. Please run the program as Administrator.")
+        return
     is_connected = check_wifi_status()
 
-    confirm = messagebox.askyesno("Confirm Termination", f"Are you sure you want to {'terminate' if is_connected else 'reconnect'} all network connections?\nThis will execute immediately.")
+    confirm = messagebox.askyesno("Confirm Termination", f"Are you sure you want to {'terminate' if is_connected else 'reconnect'} all network connections? This will execute immediately.")
 
     if confirm:
         try:
@@ -903,8 +912,8 @@ def terminate_network_connection():
                 os.system('netsh interface set interface "Wi-Fi" enable')
                 messagebox.showinfo("Network Connection", "Internet connection has been restored.")
         except Exception as e:
-            messagebox.showerror("Error", f"Error: {str(e)}")
-            
+            messagebox.showerror("Error", f"Error: {str(e)}")  
+
 initial_sent, initial_recv = get_internet_usage()
 start_time = time.time()
 
