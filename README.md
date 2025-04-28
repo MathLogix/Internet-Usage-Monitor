@@ -25,7 +25,7 @@ A powerful and lightweight tool for real-time internet usage tracking, download 
 
 ## How to Use:
 
-1. Run the application _(preferably as Administrator for full functionality)_.
+1. Run the application _(preferably as **Administrator** for full functionality)_.
 
 2. Click the 🎯 "Set Target" button to define a download limit.
 
