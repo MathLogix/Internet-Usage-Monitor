@@ -11,7 +11,7 @@ A powerful and lightweight tool for real-time internet usage tracking, download 
 
 **📑 Generate Usage Reports:** Save detailed reports of your internet activity in a text file.
 
-**⏸️ Pause & ▶️ Resume Tracking:** Control when monitoring starts or stops without closing the application.
+**⏸️ Pause & Resume Tracking:** Control when monitoring starts or stops without closing the application.
 
 **📈 Progress Visualization:** Track your download progress as a dynamic percentage relative to your target.
 
