@@ -525,15 +525,6 @@ shutdown_mode = "date"
 shutdown_window_open = False
 shutdown_win = None
 
-# def shutdown_system():
-#     os_type = platform.system()
-#     if os_type == "Windows":
-#         os.system("shutdown /s /t 1")
-#     elif os_type == "Linux" or os_type == "Darwin":
-#         os.system("shutdown now")
-#     else:
-#         messagebox.showerror("Unsupported OS", "Your operating system is not supported for shutdown.")
-
 def shutdown_system(shutdown_mode):
     os_type = platform.system()
 
@@ -547,17 +538,17 @@ def shutdown_system(shutdown_mode):
         elif shutdown_mode == "Hibernate":
             os.system("shutdown /h")
         elif shutdown_mode == "Sleep":
-            os.system("rundll32.exe powrprof.dll,SetSuspendState 0,0,0")
-        elif shutdown_mode == "Sleep":
             os.system("powercfg -hibernate off")
             ctypes.windll.PowrProf.SetSuspendState(0, 0, 0)
             os.system("powercfg -hibernate on")
         # elif shutdown_mode == "Sleep":
-        #     os.system("rundll32.exe powrprof.dll,SetSuspendState Sleep")
-        # elif shutdown_mode == "Sleep":
         #     os.system("rundll32.exe powrprof.dll,SetSuspendState 0,0,0")
+        # elif shutdown_mode == "Sleep":
+        #     os.system("rundll32.exe powrprof.dll,SetSuspendState Sleep")
         elif shutdown_mode == "Restart":
             os.system("shutdown /r /t 1")
+        elif shutdown_mode == "Cut Wi-Fi":
+            terminate_network_connection(ask_confirm=False)
         else:
             messagebox.showerror("Invalid Option", "Unknown shutdown type selected.")
     except Exception as e:
@@ -583,7 +574,7 @@ def open_shutdown_window():
     shutdown_window_open = True
 
     shutdown_win = Toplevel()
-    shutdown_win.title("Auto Shutdown Scheduler")
+    shutdown_win.title("System Automation")
     shutdown_win.iconbitmap("Internet_Usage_Monitor.ico")
     shutdown_win.geometry("400x250")
     shutdown_win.resizable(False, False)
@@ -662,11 +653,15 @@ def open_shutdown_window():
 
         mode = shutdown_plan.get()
         selected_shutdown_type = shutdown_type.get()
-
+                
         try:
             if mode == "On specific date":
                 if not date_entry or not time_entry or not calendar_type:
                     messagebox.showerror("Error", "Date/time inputs are not available.")
+                    return
+                
+                if selected_shutdown_type == "Cut Wi-Fi" and not is_admin():
+                    messagebox.showwarning("Administrator Required", "This feature requires administrator privileges. Please run the program as Administrator.")
                     return
 
                 date_str = date_entry.get()
@@ -690,6 +685,10 @@ def open_shutdown_window():
             elif mode == "On download target":
                 if not target_entry or not target_unit:
                     messagebox.showerror("Error", "Download target inputs are not available.")
+                    return
+                
+                if selected_shutdown_type == "Cut Wi-Fi" and not is_admin():
+                    messagebox.showwarning("Administrator Required", "This feature requires administrator privileges. Please run the program as Administrator.")
                     return
 
                 try:
@@ -839,7 +838,7 @@ def open_shutdown_window():
             target_type_dropdown = ttk.Combobox(frame, textvariable=target_type, values=["Total Download", "Incremental Download"], width=20, state="readonly", font=("Segoe UI", 10))
             target_type_dropdown.grid(row=1, column=1, columnspan=2, padx=5)
 
-    tk.Label(shutdown_win, text="Schedule System Shutdown", font=("Segoe UI", 14, "bold")).pack(pady=3)
+    tk.Label(shutdown_win, text="Automate Post-Target Action", font=("Segoe UI", 14, "bold")).pack(pady=3)
     tk.Label(shutdown_win, text="Choose Your Plan:", font=("Segoe UI", 12)).pack(pady=3)
    
     combo_frame = tk.Frame(shutdown_win)
@@ -853,7 +852,7 @@ def open_shutdown_window():
 
     # tk.Label(combo_frame, text="Type:", font=("Segoe UI", 10)).grid(row=0, column=2, padx=(0, 5))
     shutdown_type = tk.StringVar(value="Shutdown")
-    type_dropdown = ttk.Combobox(combo_frame, textvariable=shutdown_type, values=["Shutdown", "Hibernate", "Sleep", "Restart"], state="readonly", font=("Segoe UI", 10), width=9)
+    type_dropdown = ttk.Combobox(combo_frame, textvariable=shutdown_type, values=["Shutdown", "Hibernate", "Sleep", "Restart", "Cut Wi-Fi"], state="readonly", font=("Segoe UI", 10), width=9)
     type_dropdown.grid(row=0, column=3, padx=5)
 
     frame = tk.Frame(shutdown_win)
@@ -895,24 +894,25 @@ def check_wifi_status():
         messagebox.showerror("Error", f"Error: {str(e)}")
         return False
 
-def terminate_network_connection():
+def terminate_network_connection(ask_confirm=True):
     if not is_admin():
         messagebox.showwarning("Administrator Required", "This feature requires administrator privileges. Please run the program as Administrator.")
         return
+    
     is_connected = check_wifi_status()
-
-    confirm = messagebox.askyesno("Confirm Termination", f"Are you sure you want to {'terminate' if is_connected else 'reconnect'} all network connections? This will execute immediately.")
-
-    if confirm:
-        try:
-            if is_connected:
-                os.system('netsh interface set interface "Wi-Fi" disable') 
-                messagebox.showinfo("Network Connection", "Internet connection has been terminated.")
-            else:
-                os.system('netsh interface set interface "Wi-Fi" enable')
-                messagebox.showinfo("Network Connection", "Internet connection has been restored.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error: {str(e)}")  
+    if ask_confirm:
+        confirm = messagebox.askyesno("Confirm Termination", f"Are you sure you want to {'terminate' if is_connected else 'reconnect'} all network connections? This will execute immediately.")
+        if not confirm:
+            return
+    try:
+        if is_connected:
+            os.system('netsh interface set interface "Wi-Fi" disable') 
+            messagebox.showinfo("Network Connection", "Internet connection has been terminated.")
+        else:
+            os.system('netsh interface set interface "Wi-Fi" enable')
+            messagebox.showinfo("Network Connection", "Internet connection has been restored.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Error: {str(e)}")
 
 initial_sent, initial_recv = get_internet_usage()
 start_time = time.time()
